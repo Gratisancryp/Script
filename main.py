@@ -1,14 +1,87 @@
 import os
 import sys
+import subprocess
+
+# ============================================================
+# ===== AUTO-INSTALL DEPENDENCY (JALAN SEBELUM IMPORT) =======
+# ============================================================
+def auto_install_packages():
+    """Cek & install package yang dibutuhin tanpa user harus pip install manual."""
+    required = {
+        "colorama": "colorama",
+    }
+    
+    missing = []
+    for import_name, pip_name in required.items():
+        try:
+            __import__(import_name)
+        except ImportError:
+            missing.append(pip_name)
+    
+    if missing:
+        print(f"[*] Installing: {', '.join(missing)}...")
+        for pkg in missing:
+            try:
+                subprocess.check_call(
+                    [sys.executable, "-m", "pip", "install", pkg, "--quiet"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+            except:
+                # Fallback kalau pip gak ada
+                subprocess.check_call(
+                    [sys.executable, "-m", "ensurepip", "--default-pip"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                subprocess.check_call(
+                    [sys.executable, "-m", "pip", "install", pkg, "--quiet"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+        print(f"[OK] Selesai install.\n")
+
+# Install dulu sebelum import colorama
+auto_install_packages()
+
+# Baru import
 import time
 import json
-import subprocess
+import ssl
 import platform
 import shutil
+import urllib.request
 from colorama import init, Fore, Style
 
-# Initialize colorama
 init(autoreset=True)
+
+# ============================================================
+# ============ KONFIGURASI GITHUB ============================
+# ============================================================
+GITHUB_USER = "Gratisancryp"
+GITHUB_REPO = "Script"
+GITHUB_BRANCH = "main"
+RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{GITHUB_BRANCH}"
+
+BOT_FILES = {
+    "bots/website/bot_contoh.py": "bots/website/bot_contoh.py",
+    # tambahin bot lain di sini
+}
+# ============================================================
+
+
+def input_tty(prompt=""):
+    try:
+        with open('/dev/tty', 'r') as tty:
+            sys.stdout.write(prompt)
+            sys.stdout.flush()
+            line = tty.readline()
+            if not line:
+                raise EOFError
+            return line.rstrip('\n')
+    except (OSError, IOError):
+        return input(prompt)
+
 
 class FaucetPanel:
     def __init__(self):
@@ -16,24 +89,59 @@ class FaucetPanel:
         self.php_path = None
         self.php_version = None
         self.detect_php()
-        
-        # ===== RESET TOTAL PAS PANEL DIBUKA =====
+        self.auto_download_bots()
         self.full_reset_and_cleanup()
-        
         self.init_structure()
         self.load_bot_status()
         self.load_cookies()
-    
+
+    def auto_download_bots(self):
+        bot_folder = "bots/website"
+        os.makedirs(bot_folder, exist_ok=True)
+
+        existing = [
+            f for f in os.listdir(bot_folder)
+            if not f.startswith('__') and not f.endswith('.pyc')
+        ]
+        if existing:
+            return
+        if not BOT_FILES:
+            return
+
+        print(Fore.YELLOW + "\n[*] Setup pertama kali, download bot dari GitHub...\n")
+
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+
+        success, fail = 0, 0
+        for github_path, local_path in BOT_FILES.items():
+            url = f"{RAW_BASE}/{github_path}"
+            os.makedirs(os.path.dirname(local_path) or ".", exist_ok=True)
+
+            for attempt in range(3):
+                try:
+                    print(Fore.CYAN + f"    [{attempt+1}/3] {github_path}")
+                    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                    with urllib.request.urlopen(req, context=ctx, timeout=15) as r:
+                        with open(local_path, 'wb') as f:
+                            f.write(r.read())
+                    print(Fore.GREEN + f"    [OK] Berhasil")
+                    success += 1
+                    break
+                except Exception as e:
+                    if attempt == 2:
+                        print(Fore.RED + f"    [FAIL] {e}")
+                        fail += 1
+                    else:
+                        time.sleep(2)
+
+        print(Fore.GREEN + f"\n[OK] Download selesai: {success} sukses, {fail} gagal\n")
+        time.sleep(2)
+
     def full_reset_and_cleanup(self):
-        """RESET TOTAL: Hapus SEMUA file di root KECUALI main.py dan folder.
-        Kosongkan folder config/, logs/, data/.
-        PERTAHANKAN bots/website/!
-        """
-        
-        # ===== 1. FILE YANG DIPERTAHANKAN DI ROOT =====
         protected_files = ["main.py", "main.pyw", "requirements.txt", "README.md", ".gitignore"]
-        
-        # ===== 2. HAPUS SEMUA FILE DI ROOT (TERMASUK LOG, JSON, HTML, TXT, DLL) =====
+
         for item in os.listdir("."):
             item_path = os.path.join(".", item)
             if os.path.isdir(item_path):
@@ -44,8 +152,7 @@ class FaucetPanel:
                 os.remove(item_path)
             except:
                 pass
-        
-        # ===== 3. KOSONGKAN FOLDER CONFIG/, LOGS/, DATA/ =====
+
         for folder in ["config", "logs", "data"]:
             if os.path.exists(folder):
                 for item in os.listdir(folder):
@@ -59,11 +166,9 @@ class FaucetPanel:
                         pass
             else:
                 os.makedirs(folder, exist_ok=True)
-        
-        # ===== 4. PASTIKAN BOTS/WEBSITE/ TETAP ADA =====
+
         os.makedirs("bots/website", exist_ok=True)
-        
-        # ===== 5. BERSIHKAN CACHE DI BOTS/WEBSITE/ =====
+
         bot_folder = "bots/website"
         for item in os.listdir(bot_folder):
             item_path = os.path.join(bot_folder, item)
@@ -77,7 +182,7 @@ class FaucetPanel:
                     shutil.rmtree(item_path)
                 except:
                     pass
-    
+
     def load_cookies(self):
         self.cookies = {"accounts": []}
         cookies_file = "config/cookies.json"
@@ -87,12 +192,12 @@ class FaucetPanel:
                     self.cookies = json.load(f)
             except:
                 self.cookies = {"accounts": []}
-    
+
     def save_cookies(self):
         os.makedirs("config", exist_ok=True)
         with open("config/cookies.json", 'w') as f:
             json.dump(self.cookies, f, indent=4)
-    
+
     def init_structure(self):
         self.bot_scripts = {
             "website": {
@@ -100,7 +205,7 @@ class FaucetPanel:
                 "bots": [{"id": 0, "name": "KEMBALI", "script": "back", "type": "back"}]
             }
         }
-    
+
     def load_bot_status(self):
         self.bot_status = {}
         status_file = "config/bot_status.json"
@@ -110,14 +215,13 @@ class FaucetPanel:
                     self.bot_status = json.load(f)
             except:
                 self.bot_status = {}
-    
+
     def save_bot_status(self):
         os.makedirs("config", exist_ok=True)
         with open("config/bot_status.json", 'w') as f:
             json.dump(self.bot_status, f, indent=4)
-    
+
     def detect_php(self):
-        php_paths = []
         if platform.system() == "Windows":
             php_paths = ["php", "php.exe", "C:\\xampp\\php\\php.exe",
                          "C:\\xampp8\\php\\php.exe", "C:\\xampp7\\php\\php.exe",
@@ -128,7 +232,7 @@ class FaucetPanel:
                          "/opt/lampp/bin/php", "/data/data/com.termux/files/usr/bin/php",
                          "/usr/bin/php7.4", "/usr/bin/php8.0", "/usr/bin/php8.1",
                          "/usr/bin/php8.2", "/usr/bin/php8.3"]
-        
+
         for path in php_paths:
             try:
                 if os.path.exists(path) or path in ["php", "php.exe"]:
@@ -143,34 +247,26 @@ class FaucetPanel:
                         break
             except:
                 continue
-    
+
     def clear_screen(self):
         os.system('cls' if os.name == 'nt' else 'clear')
-    
+
     def print_banner(self):
         banner = r'''
-    
  ██████╗ ██████╗  █████╗ ████████╗██╗███████╗ █████╗ ███╗   ██╗
 ██╔════╝ ██╔══██╗██╔══██╗╚══██╔══╝██║██╔════╝██╔══██╗████╗  ██║
 ██║  ███╗██████╔╝███████║   ██║   ██║███████╗███████║██╔██╗ ██║
 ██║   ██║██╔══██╗██╔══██║   ██║   ██║╚════██║██╔══██║██║╚██╗██║
 ╚██████╔╝██║  ██║██║  ██║   ██║   ██║███████║██║  ██║██║ ╚████║
  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝   ╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝
-                                                               
-                               ██████╗██████╗ ██╗   ██╗██████╗ 
-                              ██╔════╝██╔══██╗╚██╗ ██╔╝██╔══██╗
-                              ██║     ██████╔╝ ╚████╔╝ ██████╔╝
-                              ██║     ██╔══██╗  ╚██╔╝  ██╔═══╝ 
-                        ██╗██╗╚██████╗██║  ██║   ██║   ██║     
-                        ╚═╝╚═╝ ╚═════╝╚═╝  ╚═╝   ╚═╝   ╚═╝                                                                    
-                        https://t.me/gratisancryp                                                                   
-    '''
+                        https://t.me/gratisancryp
+'''
         print(Fore.GREEN + banner)
         print(Fore.GREEN + "  " + "=" * 56)
         print(Fore.GREEN + "  " + " " * 15 + "WELCOME TO GRATISANCRYP BOT" + " " * 15)
         print(Fore.GREEN + "  " + "=" * 56)
         print()
-    
+
     def print_banner_small(self):
         banner = r'''
  ██████╗ ██████╗  █████╗ ████████╗██╗███████╗ █████╗ ███╗   ██╗
@@ -179,21 +275,14 @@ class FaucetPanel:
 ██║   ██║██╔══██╗██╔══██║   ██║   ██║╚════██║██╔══██║██║╚██╗██║
 ╚██████╔╝██║  ██║██║  ██║   ██║   ██║███████║██║  ██║██║ ╚████║
  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝   ╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝
-                                                               
-                               ██████╗██████╗ ██╗   ██╗██████╗ 
-                              ██╔════╝██╔══██╗╚██╗ ██╔╝██╔══██╗
-                              ██║     ██████╔╝ ╚████╔╝ ██████╔╝
-                              ██║     ██╔══██╗  ╚██╔╝  ██╔═══╝ 
-                        ██╗██╗╚██████╗██║  ██║   ██║   ██║     
-                        ╚═╝╚═╝ ╚═════╝╚═╝  ╚═╝   ╚═╝   ╚═╝     
-                        https://t.me/gratisancryp                                      
+                        https://t.me/gratisancryp
 '''
         print(Fore.GREEN + banner)
         print(Fore.GREEN + "=" * 60)
         print(Fore.GREEN + "            GRATISANCRYP BOT PANEL")
         print(Fore.GREEN + "=" * 60)
         print()
-    
+
     def main_menu(self):
         while True:
             self.clear_screen()
@@ -204,9 +293,9 @@ class FaucetPanel:
             print(Fore.RED + "  [2] " + Fore.WHITE + "EXIT / KELUAR")
             print(Fore.CYAN + "  " + "-" * 56)
             print()
-            
-            choice = input(Fore.GREEN + "  Pilih menu [1-2]: " + Fore.WHITE).strip()
-            
+
+            choice = input_tty(Fore.GREEN + "  Pilih menu [1-2]: " + Fore.WHITE).strip()
+
             if choice == "1":
                 self.show_bot_list("website")
             elif choice == "2":
@@ -216,13 +305,13 @@ class FaucetPanel:
             else:
                 print(Fore.RED + "  Pilihan tidak valid!")
                 time.sleep(1)
-    
+
     def scan_bot_scripts_silent(self):
         bot_folder = "bots/website"
         os.makedirs(bot_folder, exist_ok=True)
-        
+
         self.bot_scripts["website"]["bots"] = [{"id": 0, "name": "KEMBALI", "script": "back", "type": "back"}]
-        
+
         if os.path.exists(bot_folder):
             files = os.listdir(bot_folder)
             bot_id = 1
@@ -238,28 +327,28 @@ class FaucetPanel:
                             "type": "python" if file.endswith('.py') else "php"
                         })
                         bot_id += 1
-    
+
     def show_bot_list(self, category):
         self.scan_bot_scripts_silent()
-        
+
         while True:
             self.clear_screen()
             self.print_banner_small()
-            
+
             category_data = self.bot_scripts.get(category)
             if not category_data:
                 print(Fore.RED + "Kategori tidak ditemukan!")
                 time.sleep(1)
                 return
-            
+
             bots = category_data["bots"]
-            
+
             print(Fore.WHITE + "  DAFTAR BOT")
             print(Fore.CYAN + "  " + "-" * 56)
-            
+
             bot_list = [b for b in bots if b.get("type") != "back"]
             back_bot = [b for b in bots if b.get("type") == "back"]
-            
+
             if not bot_list:
                 print(Fore.YELLOW + "  Belum ada script bot di folder bots/website/")
                 print(Fore.YELLOW + "  Taruh script .py atau .php di folder tersebut")
@@ -277,42 +366,42 @@ class FaucetPanel:
                         else:
                             line += " " * 30
                     print(line)
-            
+
             print(Fore.CYAN + "  " + "-" * 56)
             if back_bot:
                 bot = back_bot[0]
                 print(Fore.YELLOW + f"  [{bot['id']:2}] " + Fore.WHITE + bot['name'])
             print(Fore.CYAN + "  " + "-" * 56)
             print()
-            
-            choice = input(Fore.GREEN + "  Pilih bot [0-{0}]: ".format(len(bots)-1) + Fore.WHITE).strip()
-            
+
+            choice = input_tty(Fore.GREEN + "  Pilih bot [0-{0}]: ".format(len(bots)-1) + Fore.WHITE).strip()
+
             try:
                 choice_int = int(choice)
                 if choice_int == 0:
                     return
-                
+
                 selected_bot = None
                 for bot in bots:
                     if bot["id"] == choice_int:
                         selected_bot = bot
                         break
-                
+
                 if selected_bot:
                     if selected_bot["script"] == "back":
                         return
-                    
+
                     if not os.path.exists(selected_bot["script"]):
                         print(Fore.RED + f"\n  [ERROR] File tidak ditemukan!")
-                        input("\n" + Fore.WHITE + "  Press Enter to continue...")
+                        input_tty("\n" + Fore.WHITE + "  Press Enter to continue...")
                         continue
-                    
+
                     if selected_bot.get("type") == "php" and not self.php_path:
                         print(Fore.RED + "\n  [ERROR] PHP tidak ditemukan!")
                         print(Fore.YELLOW + "  Bot PHP tidak bisa dijalankan.")
-                        input("\n" + Fore.WHITE + "  Press Enter to continue...")
+                        input_tty("\n" + Fore.WHITE + "  Press Enter to continue...")
                         continue
-                    
+
                     self.run_bot_script(selected_bot["name"], selected_bot["script"], selected_bot.get("type", "python"))
                 else:
                     print(Fore.RED + "  Pilihan tidak valid!")
@@ -320,44 +409,44 @@ class FaucetPanel:
             except ValueError:
                 print(Fore.RED + "  Input tidak valid! Masukkan angka.")
                 time.sleep(1)
-    
+
     def run_bot_script(self, bot_name, script_file, script_type="python"):
         self.clear_screen()
         self.print_banner_small()
         print(Fore.GREEN + f"  Menjalankan: {bot_name}")
         print(Fore.CYAN + "  " + "-" * 56)
         print()
-        
+
         if not os.path.exists(script_file):
             print(Fore.RED + f"  File script tidak ditemukan!")
-            input("\n" + Fore.WHITE + "  Press Enter to continue...")
+            input_tty("\n" + Fore.WHITE + "  Press Enter to continue...")
             return
-        
+
         print(Fore.WHITE + f"  Bot : {Fore.GREEN}{bot_name}")
         print(Fore.WHITE + f"  File: {Fore.YELLOW}{script_file}")
         print()
-        
-        confirm = input(Fore.YELLOW + "  Lanjutkan? (y/n): " + Fore.WHITE).lower().strip()
-        
+
+        confirm = input_tty(Fore.YELLOW + "  Lanjutkan? (y/n): " + Fore.WHITE).lower().strip()
+
         if confirm != 'y':
             print(Fore.YELLOW + "  Dibatalkan.")
             time.sleep(1)
             return
-        
+
         try:
             print(Fore.CYAN + "\n  " + "=" * 56)
             print(Fore.GREEN + f"  >> Menjalankan {bot_name}...")
             print(Fore.CYAN + "  " + "=" * 56 + "\n")
-            
+
             if script_type == "php":
                 if not self.php_path:
                     print(Fore.RED + "  PHP not found! Cannot run PHP script.")
-                    input("\n  Press Enter to continue...")
+                    input_tty("\n  Press Enter to continue...")
                     return
                 result = subprocess.run([self.php_path, script_file], capture_output=False, text=True)
             else:
                 result = subprocess.run([sys.executable, script_file], capture_output=False, text=True)
-            
+
             print(Fore.CYAN + "\n  " + "=" * 56)
             if result.returncode == 0:
                 print(Fore.GREEN + "  [OK] Bot selesai dijalankan!")
@@ -368,24 +457,12 @@ class FaucetPanel:
             print(Fore.YELLOW + "\n\n  [STOP] Bot dihentikan oleh user.")
         except Exception as e:
             print(Fore.RED + f"  [ERROR] {str(e)}")
-        
-        input("\n" + Fore.WHITE + "  Press Enter to continue...")
+
+        input_tty("\n" + Fore.WHITE + "  Press Enter to continue...")
+
 
 def main():
     try:
-        required = ["colorama"]
-        missing = []
-        for package in required:
-            try:
-                __import__(package)
-            except ImportError:
-                missing.append(package)
-        
-        if missing:
-            print(Fore.YELLOW + f"Installing required packages: {', '.join(missing)}")
-            subprocess.check_call([sys.executable, "-m", "pip", "install"] + missing)
-            print(Fore.GREEN + "Packages installed successfully!")
-        
         panel = FaucetPanel()
         panel.main_menu()
     except KeyboardInterrupt:
@@ -393,8 +470,9 @@ def main():
         sys.exit(0)
     except Exception as e:
         print(Fore.RED + f"Error: {e}")
-        input("\nPress Enter to exit...")
+        input_tty("\nPress Enter to exit...")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
