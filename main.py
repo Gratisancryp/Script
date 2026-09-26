@@ -41,6 +41,7 @@ import json
 import ssl
 import platform
 import shutil
+import hashlib
 import urllib.request
 import urllib.error
 from colorama import init, Fore, Style
@@ -57,6 +58,70 @@ RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{GITH
 API_BASE = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents"
 BOT_FOLDER_GITHUB = "bots/website"
 BOT_FOLDER_LOCAL = "bots/website"
+MAIN_PY_URL = f"{RAW_BASE}/main.py"
+# ============================================================
+
+
+# ============================================================
+# ===== AUTO-UPDATE MAIN.PY (JALAN SEBELUM APA-APA) ==========
+# ============================================================
+def _get_ssl_ctx():
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+def _fetch_url(url, timeout=15):
+    ctx = _get_ssl_ctx()
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+    with urllib.request.urlopen(req, context=ctx, timeout=timeout) as r:
+        return r.read()
+
+def auto_update_main():
+    """Cek main.py di GitHub, kalau beda sama lokal → download & restart."""
+    
+    # Kalau di-pipe (curl | python3), __file__ gak ada → skip
+    try:
+        current_file = os.path.abspath(__file__)
+    except NameError:
+        return
+    
+    if not os.path.exists(current_file):
+        return
+    
+    # Baca file lokal
+    try:
+        with open(current_file, 'rb') as f:
+            local_content = f.read()
+    except:
+        return
+    
+    # Ambil file dari GitHub
+    try:
+        remote_content = _fetch_url(MAIN_PY_URL)
+    except:
+        return  # gagal konek, jalanin versi lokal
+    
+    # Bandingin
+    if local_content == remote_content:
+        return  # sama, gak perlu update
+    
+    # Beda → timpa file lokal
+    try:
+        with open(current_file, 'wb') as f:
+            f.write(remote_content)
+    except:
+        return  # gagal nulis, jalanin versi lama
+    
+    # Restart script pakai versi baru
+    try:
+        os.execv(sys.executable, [sys.executable, current_file] + sys.argv[1:])
+    except:
+        # Kalau execv gagal, minta user run manual
+        print(Fore.YELLOW + "\n[!] Update terdownload. Jalanin ulang: python3 main.py")
+        sys.exit(0)
+
+auto_update_main()
 # ============================================================
 
 
@@ -90,19 +155,9 @@ class FaucetPanel:
     # ============================================================
     def get_github_bot_list(self):
         api_url = f"{API_BASE}/{BOT_FOLDER_GITHUB}?ref={GITHUB_BRANCH}"
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        req = urllib.request.Request(
-            api_url,
-            headers={
-                'User-Agent': 'Mozilla/5.0',
-                'Accept': 'application/vnd.github.v3+json'
-            }
-        )
         try:
-            with urllib.request.urlopen(req, context=ctx, timeout=15) as r:
-                return json.loads(r.read().decode('utf-8'))
+            data = _fetch_url(api_url)
+            return json.loads(data.decode('utf-8'))
         except:
             return []
 
@@ -127,10 +182,6 @@ class FaucetPanel:
         if not bot_files:
             return
 
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-
         for f in bot_files:
             filename = f['name']
             download_url = f['download_url']
@@ -141,13 +192,9 @@ class FaucetPanel:
 
             for attempt in range(3):
                 try:
-                    req = urllib.request.Request(
-                        download_url,
-                        headers={'User-Agent': 'Mozilla/5.0'}
-                    )
-                    with urllib.request.urlopen(req, context=ctx, timeout=15) as r:
-                        with open(local_path, 'wb') as out:
-                            out.write(r.read())
+                    content = _fetch_url(download_url)
+                    with open(local_path, 'wb') as out:
+                        out.write(content)
                     break
                 except:
                     if attempt < 2:
