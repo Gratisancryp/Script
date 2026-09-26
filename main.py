@@ -339,7 +339,7 @@ class FaucetPanel:
 '''
         print(Fore.GREEN + banner)
         print(Fore.GREEN + "=" * 60)
-        print(Fore.GREEN + "            GRATISANCRYP BOT PANEL")
+        print(Fore.GREEN + "                 GRATISANCRYP BOT PANEL")
         print(Fore.GREEN + "=" * 60)
         print()
 
