@@ -3,14 +3,12 @@ import sys
 import subprocess
 
 # ============================================================
-# ===== AUTO-INSTALL DEPENDENCY (JALAN SEBELUM IMPORT) =======
+# ===== AUTO-INSTALL DEPENDENCY (SEBELUM IMPORT) =============
 # ============================================================
 def auto_install_packages():
-    """Cek & install package yang dibutuhin tanpa user harus pip install manual."""
     required = {
         "colorama": "colorama",
     }
-    
     missing = []
     for import_name, pip_name in required.items():
         try:
@@ -24,33 +22,31 @@ def auto_install_packages():
             try:
                 subprocess.check_call(
                     [sys.executable, "-m", "pip", "install", pkg, "--quiet"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                 )
             except:
-                # Fallback kalau pip gak ada
-                subprocess.check_call(
-                    [sys.executable, "-m", "ensurepip", "--default-pip"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-                subprocess.check_call(
-                    [sys.executable, "-m", "pip", "install", pkg, "--quiet"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
+                try:
+                    subprocess.check_call(
+                        [sys.executable, "-m", "ensurepip", "--default-pip"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                    )
+                    subprocess.check_call(
+                        [sys.executable, "-m", "pip", "install", pkg, "--quiet"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                    )
+                except:
+                    pass
         print(f"[OK] Selesai install.\n")
 
-# Install dulu sebelum import colorama
 auto_install_packages()
 
-# Baru import
 import time
 import json
 import ssl
 import platform
 import shutil
 import urllib.request
+import urllib.error
 from colorama import init, Fore, Style
 
 init(autoreset=True)
@@ -62,11 +58,9 @@ GITHUB_USER = "Gratisancryp"
 GITHUB_REPO = "Script"
 GITHUB_BRANCH = "main"
 RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{GITHUB_BRANCH}"
-
-BOT_FILES = {
-    "bots/website/bot_contoh.py": "bots/website/bot_contoh.py",
-    # tambahin bot lain di sini
-}
+API_BASE = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents"
+BOT_FOLDER_GITHUB = "bots/website"   # folder di GitHub
+BOT_FOLDER_LOCAL = "bots/website"    # folder lokal
 # ============================================================
 
 
@@ -95,37 +89,104 @@ class FaucetPanel:
         self.load_bot_status()
         self.load_cookies()
 
-    def auto_download_bots(self):
-        bot_folder = "bots/website"
-        os.makedirs(bot_folder, exist_ok=True)
-
-        existing = [
-            f for f in os.listdir(bot_folder)
-            if not f.startswith('__') and not f.endswith('.pyc')
-        ]
-        if existing:
-            return
-        if not BOT_FILES:
-            return
-
-        print(Fore.YELLOW + "\n[*] Setup pertama kali, download bot dari GitHub...\n")
-
+    # ============================================================
+    # ===== AUTO-SCAN & DOWNLOAD BOT DARI GITHUB =================
+    # ============================================================
+    def get_github_bot_list(self):
+        """Ambil daftar file bot dari GitHub API."""
+        api_url = f"{API_BASE}/{BOT_FOLDER_GITHUB}?ref={GITHUB_BRANCH}"
+        
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
+        
+        req = urllib.request.Request(
+            api_url,
+            headers={
+                'User-Agent': 'Mozilla/5.0',
+                'Accept': 'application/vnd.github.v3+json'
+            }
+        )
+        
+        try:
+            with urllib.request.urlopen(req, context=ctx, timeout=15) as r:
+                data = json.loads(r.read().decode('utf-8'))
+            return data
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                print(Fore.YELLOW + f"[!] Folder '{BOT_FOLDER_GITHUB}' gak ditemukan di GitHub.")
+                print(Fore.YELLOW + f"[!] Bikin folder + upload bot dulu di repo.")
+                return []
+            else:
+                print(Fore.RED + f"[!] GitHub API error: {e.code} {e.reason}")
+                return []
+        except Exception as e:
+            print(Fore.RED + f"[!] Gagal akses GitHub API: {e}")
+            return []
 
+    def auto_download_bots(self):
+        """Scan folder bots/website/ di GitHub, download semua .py/.php."""
+        os.makedirs(BOT_FOLDER_LOCAL, exist_ok=True)
+        
+        # Cek apakah folder lokal udah ada isinya
+        existing = [
+            f for f in os.listdir(BOT_FOLDER_LOCAL)
+            if not f.startswith('__') and not f.endswith('.pyc')
+        ]
+        
+        if existing:
+            # Udah ada isinya, skip download
+            return
+        
+        print(Fore.YELLOW + "\n[*] Setup pertama kali, scan bot di GitHub...\n")
+        
+        # Ambil daftar file dari GitHub API
+        files = self.get_github_bot_list()
+        
+        if not files:
+            print(Fore.YELLOW + "[!] Gak ada bot yang bisa di-download.")
+            print(Fore.YELLOW + "[!] Panel tetap jalan, tapi tanpa bot.\n")
+            time.sleep(2)
+            return
+        
+        # Filter cuma file .py / .php
+        bot_files = [
+            f for f in files
+            if f.get('type') == 'file' and f['name'].endswith(('.py', '.php'))
+        ]
+        
+        if not bot_files:
+            print(Fore.YELLOW + "[!] Gak ada file .py/.php di folder GitHub.\n")
+            time.sleep(2)
+            return
+        
+        print(Fore.CYAN + f"[*] Ketemu {len(bot_files)} bot. Mulai download...\n")
+        
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        
         success, fail = 0, 0
-        for github_path, local_path in BOT_FILES.items():
-            url = f"{RAW_BASE}/{github_path}"
-            os.makedirs(os.path.dirname(local_path) or ".", exist_ok=True)
-
+        for f in bot_files:
+            filename = f['name']
+            download_url = f['download_url']
+            local_path = os.path.join(BOT_FOLDER_LOCAL, filename)
+            
+            # Kalau file udah ada, skip
+            if os.path.exists(local_path):
+                continue
+            
+            # Retry 3x
             for attempt in range(3):
                 try:
-                    print(Fore.CYAN + f"    [{attempt+1}/3] {github_path}")
-                    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                    print(Fore.CYAN + f"    [{attempt+1}/3] {filename}")
+                    req = urllib.request.Request(
+                        download_url,
+                        headers={'User-Agent': 'Mozilla/5.0'}
+                    )
                     with urllib.request.urlopen(req, context=ctx, timeout=15) as r:
-                        with open(local_path, 'wb') as f:
-                            f.write(r.read())
+                        with open(local_path, 'wb') as out:
+                            out.write(r.read())
                     print(Fore.GREEN + f"    [OK] Berhasil")
                     success += 1
                     break
@@ -135,7 +196,7 @@ class FaucetPanel:
                         fail += 1
                     else:
                         time.sleep(2)
-
+        
         print(Fore.GREEN + f"\n[OK] Download selesai: {success} sukses, {fail} gagal\n")
         time.sleep(2)
 
@@ -167,11 +228,10 @@ class FaucetPanel:
             else:
                 os.makedirs(folder, exist_ok=True)
 
-        os.makedirs("bots/website", exist_ok=True)
+        os.makedirs(BOT_FOLDER_LOCAL, exist_ok=True)
 
-        bot_folder = "bots/website"
-        for item in os.listdir(bot_folder):
-            item_path = os.path.join(bot_folder, item)
+        for item in os.listdir(BOT_FOLDER_LOCAL):
+            item_path = os.path.join(BOT_FOLDER_LOCAL, item)
             if item.endswith(".pyc") or item.endswith(".pyo"):
                 try:
                     os.remove(item_path)
@@ -307,7 +367,7 @@ class FaucetPanel:
                 time.sleep(1)
 
     def scan_bot_scripts_silent(self):
-        bot_folder = "bots/website"
+        bot_folder = BOT_FOLDER_LOCAL
         os.makedirs(bot_folder, exist_ok=True)
 
         self.bot_scripts["website"]["bots"] = [{"id": 0, "name": "KEMBALI", "script": "back", "type": "back"}]
@@ -443,9 +503,20 @@ class FaucetPanel:
                     print(Fore.RED + "  PHP not found! Cannot run PHP script.")
                     input_tty("\n  Press Enter to continue...")
                     return
-                result = subprocess.run([self.php_path, script_file], capture_output=False, text=True)
+                # Pakai stdin dari /dev/tty biar bot bisa input
+                try:
+                    tty_in = open('/dev/tty', 'r')
+                except:
+                    tty_in = None
+                result = subprocess.run([self.php_path, script_file], stdin=tty_in,
+                                        capture_output=False, text=True)
             else:
-                result = subprocess.run([sys.executable, script_file], capture_output=False, text=True)
+                try:
+                    tty_in = open('/dev/tty', 'r')
+                except:
+                    tty_in = None
+                result = subprocess.run([sys.executable, script_file], stdin=tty_in,
+                                        capture_output=False, text=True)
 
             print(Fore.CYAN + "\n  " + "=" * 56)
             if result.returncode == 0:
