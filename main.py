@@ -3,21 +3,18 @@ import sys
 import subprocess
 
 # ============================================================
-# ===== AUTO-INSTALL DEPENDENCY (SEBELUM IMPORT) =============
+# ===== AUTO-INSTALL DEPENDENCY (SENYAP) =====================
 # ============================================================
 def auto_install_packages():
-    required = {
-        "colorama": "colorama",
-    }
+    required = {"colorama": "colorama"}
     missing = []
     for import_name, pip_name in required.items():
         try:
             __import__(import_name)
         except ImportError:
             missing.append(pip_name)
-    
+
     if missing:
-        print(f"[*] Installing: {', '.join(missing)}...")
         for pkg in missing:
             try:
                 subprocess.check_call(
@@ -36,7 +33,6 @@ def auto_install_packages():
                     )
                 except:
                     pass
-        print(f"[OK] Selesai install.\n")
 
 auto_install_packages()
 
@@ -59,8 +55,8 @@ GITHUB_REPO = "Script"
 GITHUB_BRANCH = "main"
 RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{GITHUB_BRANCH}"
 API_BASE = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents"
-BOT_FOLDER_GITHUB = "bots/website"   # folder di GitHub
-BOT_FOLDER_LOCAL = "bots/website"    # folder lokal
+BOT_FOLDER_GITHUB = "bots/website"
+BOT_FOLDER_LOCAL = "bots/website"
 # ============================================================
 
 
@@ -77,6 +73,13 @@ def input_tty(prompt=""):
         return input(prompt)
 
 
+def get_term_width(default=80):
+    try:
+        return os.get_terminal_size().columns
+    except:
+        return default
+
+
 class FaucetPanel:
     def __init__(self):
         self.clear_screen()
@@ -90,16 +93,13 @@ class FaucetPanel:
         self.load_cookies()
 
     # ============================================================
-    # ===== AUTO-SCAN & DOWNLOAD BOT DARI GITHUB =================
+    # ===== AUTO-SCAN & DOWNLOAD BOT DARI GITHUB (SENYAP) ========
     # ============================================================
     def get_github_bot_list(self):
-        """Ambil daftar file bot dari GitHub API."""
         api_url = f"{API_BASE}/{BOT_FOLDER_GITHUB}?ref={GITHUB_BRANCH}"
-        
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
-        
         req = urllib.request.Request(
             api_url,
             headers={
@@ -107,79 +107,47 @@ class FaucetPanel:
                 'Accept': 'application/vnd.github.v3+json'
             }
         )
-        
         try:
             with urllib.request.urlopen(req, context=ctx, timeout=15) as r:
-                data = json.loads(r.read().decode('utf-8'))
-            return data
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
-                print(Fore.YELLOW + f"[!] Folder '{BOT_FOLDER_GITHUB}' gak ditemukan di GitHub.")
-                print(Fore.YELLOW + f"[!] Bikin folder + upload bot dulu di repo.")
-                return []
-            else:
-                print(Fore.RED + f"[!] GitHub API error: {e.code} {e.reason}")
-                return []
-        except Exception as e:
-            print(Fore.RED + f"[!] Gagal akses GitHub API: {e}")
+                return json.loads(r.read().decode('utf-8'))
+        except:
             return []
 
     def auto_download_bots(self):
-        """Scan folder bots/website/ di GitHub, download semua .py/.php."""
         os.makedirs(BOT_FOLDER_LOCAL, exist_ok=True)
-        
-        # Cek apakah folder lokal udah ada isinya
+
         existing = [
             f for f in os.listdir(BOT_FOLDER_LOCAL)
             if not f.startswith('__') and not f.endswith('.pyc')
         ]
-        
         if existing:
-            # Udah ada isinya, skip download
             return
-        
-        print(Fore.YELLOW + "\n[*] Setup pertama kali, scan bot di GitHub...\n")
-        
-        # Ambil daftar file dari GitHub API
+
         files = self.get_github_bot_list()
-        
         if not files:
-            print(Fore.YELLOW + "[!] Gak ada bot yang bisa di-download.")
-            print(Fore.YELLOW + "[!] Panel tetap jalan, tapi tanpa bot.\n")
-            time.sleep(2)
             return
-        
-        # Filter cuma file .py / .php
+
         bot_files = [
             f for f in files
             if f.get('type') == 'file' and f['name'].endswith(('.py', '.php'))
         ]
-        
         if not bot_files:
-            print(Fore.YELLOW + "[!] Gak ada file .py/.php di folder GitHub.\n")
-            time.sleep(2)
             return
-        
-        print(Fore.CYAN + f"[*] Ketemu {len(bot_files)} bot. Mulai download...\n")
-        
+
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
-        
-        success, fail = 0, 0
+
         for f in bot_files:
             filename = f['name']
             download_url = f['download_url']
             local_path = os.path.join(BOT_FOLDER_LOCAL, filename)
-            
-            # Kalau file udah ada, skip
+
             if os.path.exists(local_path):
                 continue
-            
-            # Retry 3x
+
             for attempt in range(3):
                 try:
-                    print(Fore.CYAN + f"    [{attempt+1}/3] {filename}")
                     req = urllib.request.Request(
                         download_url,
                         headers={'User-Agent': 'Mozilla/5.0'}
@@ -187,19 +155,14 @@ class FaucetPanel:
                     with urllib.request.urlopen(req, context=ctx, timeout=15) as r:
                         with open(local_path, 'wb') as out:
                             out.write(r.read())
-                    print(Fore.GREEN + f"    [OK] Berhasil")
-                    success += 1
                     break
-                except Exception as e:
-                    if attempt == 2:
-                        print(Fore.RED + f"    [FAIL] {e}")
-                        fail += 1
-                    else:
-                        time.sleep(2)
-        
-        print(Fore.GREEN + f"\n[OK] Download selesai: {success} sukses, {fail} gagal\n")
-        time.sleep(2)
+                except:
+                    if attempt < 2:
+                        time.sleep(1)
 
+    # ============================================================
+    # ===== RESET & CLEANUP ======================================
+    # ============================================================
     def full_reset_and_cleanup(self):
         protected_files = ["main.py", "main.pyw", "requirements.txt", "README.md", ".gitignore"]
 
@@ -311,38 +274,74 @@ class FaucetPanel:
     def clear_screen(self):
         os.system('cls' if os.name == 'nt' else 'clear')
 
+    # ============================================================
+    # ===== BANNER (CENTER OTOMATIS) =============================
+    # ============================================================
     def print_banner(self):
-        banner = r'''
- ██████╗ ██████╗  █████╗ ████████╗██╗███████╗ █████╗ ███╗   ██╗
-██╔════╝ ██╔══██╗██╔══██╗╚══██╔══╝██║██╔════╝██╔══██╗████╗  ██║
-██║  ███╗██████╔╝███████║   ██║   ██║███████╗███████║██╔██╗ ██║
-██║   ██║██╔══██╗██╔══██║   ██║   ██║╚════██║██╔══██║██║╚██╗██║
-╚██████╔╝██║  ██║██║  ██║   ██║   ██║███████║██║  ██║██║ ╚████║
- ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝   ╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝
-                        https://t.me/gratisancryp
-'''
-        print(Fore.GREEN + banner)
-        print(Fore.GREEN + "  " + "=" * 56)
-        print(Fore.GREEN + "  " + " " * 15 + "WELCOME TO GRATISANCRYP BOT" + " " * 15)
-        print(Fore.GREEN + "  " + "=" * 56)
+        banner_lines = [
+            " ██████╗ ██████╗  █████╗ ████████╗██╗███████╗ █████╗ ███╗   ██╗",
+            "██╔════╝ ██╔══██╗██╔══██╗╚══██╔══╝██║██╔════╝██╔══██╗████╗  ██║",
+            "██║  ███╗██████╔╝███████║   ██║   ██║███████╗███████║██╔██╗ ██║",
+            "██║   ██║██╔══██╗██╔══██║   ██║   ██║╚════██║██╔══██║██║╚██╗██║",
+            "╚██████╔╝██║  ██║██║  ██║   ██║   ██║███████║██║  ██║██║ ╚████║",
+            " ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝   ╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝",
+            "                                                               ",
+            "                               ██████╗██████╗ ██╗   ██╗██████╗ ",
+            "                              ██╔════╝██╔══██╗╚██╗ ██╔╝██╔══██╗",
+            "                              ██║     ██████╔╝ ╚████╔╝ ██████╔╝",
+            "                              ██║     ██╔══██╗  ╚██╔╝  ██╔═══╝ ",
+            "                        ██╗██╗╚██████╗██║  ██║   ██║   ██║     ",
+            "                        ╚═╝╚═╝ ╚═════╝╚═╝  ╚═╝   ╚═╝   ╚═╝     ",
+            "                        https://t.me/gratisancryp             ",
+        ]
+
+        term_width = get_term_width()
+
+        print()
+        for line in banner_lines:
+            print(Fore.GREEN + line.center(term_width))
+        print()
+
+        box_width = 56
+        print(Fore.GREEN + ("=" * box_width).center(term_width))
+        print(Fore.GREEN + "WELCOME TO GRATISANCRYP BOT".center(term_width))
+        print(Fore.GREEN + ("=" * box_width).center(term_width))
         print()
 
     def print_banner_small(self):
-        banner = r'''
- ██████╗ ██████╗  █████╗ ████████╗██╗███████╗ █████╗ ███╗   ██╗
-██╔════╝ ██╔══██╗██╔══██╗╚══██╔══╝██║██╔════╝██╔══██╗████╗  ██║
-██║  ███╗██████╔╝███████║   ██║   ██║███████╗███████║██╔██╗ ██║
-██║   ██║██╔══██╗██╔══██║   ██║   ██║╚════██║██╔══██║██║╚██╗██║
-╚██████╔╝██║  ██║██║  ██║   ██║   ██║███████║██║  ██║██║ ╚████║
- ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝   ╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝
-                        https://t.me/gratisancryp
-'''
-        print(Fore.GREEN + banner)
-        print(Fore.GREEN + "=" * 60)
-        print(Fore.GREEN + "                 GRATISANCRYP BOT PANEL")
-        print(Fore.GREEN + "=" * 60)
+        banner_lines = [
+            " ██████╗ ██████╗  █████╗ ████████╗██╗███████╗ █████╗ ███╗   ██╗",
+            "██╔════╝ ██╔══██╗██╔══██╗╚══██╔══╝██║██╔════╝██╔══██╗████╗  ██║",
+            "██║  ███╗██████╔╝███████║   ██║   ██║███████╗███████║██╔██╗ ██║",
+            "██║   ██║██╔══██╗██╔══██║   ██║   ██║╚════██║██╔══██║██║╚██╗██║",
+            "╚██████╔╝██║  ██║██║  ██║   ██║   ██║███████║██║  ██║██║ ╚████║",
+            " ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝   ╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝",
+            "                                                               ",
+            "                               ██████╗██████╗ ██╗   ██╗██████╗ ",
+            "                              ██╔════╝██╔══██╗╚██╗ ██╔╝██╔══██╗",
+            "                              ██║     ██████╔╝ ╚████╔╝ ██████╔╝",
+            "                              ██║     ██╔══██╗  ╚██╔╝  ██╔═══╝ ",
+            "                        ██╗██╗╚██████╗██║  ██║   ██║   ██║     ",
+            "                        ╚═╝╚═╝ ╚═════╝╚═╝  ╚═╝   ╚═╝   ╚═╝     ",
+            "                        https://t.me/gratisancryp             ",
+        ]
+
+        term_width = get_term_width()
+
+        print()
+        for line in banner_lines:
+            print(Fore.GREEN + line.center(term_width))
         print()
 
+        box_width = 60
+        print(Fore.GREEN + ("=" * box_width).center(term_width))
+        print(Fore.GREEN + "GRATISANCRYP BOT PANEL".center(term_width))
+        print(Fore.GREEN + ("=" * box_width).center(term_width))
+        print()
+
+    # ============================================================
+    # ===== MENU =================================================
+    # ============================================================
     def main_menu(self):
         while True:
             self.clear_screen()
@@ -503,7 +502,6 @@ class FaucetPanel:
                     print(Fore.RED + "  PHP not found! Cannot run PHP script.")
                     input_tty("\n  Press Enter to continue...")
                     return
-                # Pakai stdin dari /dev/tty biar bot bisa input
                 try:
                     tty_in = open('/dev/tty', 'r')
                 except:
